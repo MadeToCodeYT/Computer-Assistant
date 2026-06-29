@@ -1,0 +1,29 @@
+text,intent
+
+"Set a timer for 10 minutes",timer
+"Set a timer for 2 hours and 30 seconds",timer
+"Start a 5 minute timer",timer
+"Set a countdown for 30 seconds",timer
+"Timer for one hour",timer
+"Begin a timer for 15 minutes and 10 seconds",timer
+"Start a timer for 20 minutes",timer
+"Can you set a timer for 3 hours?",timer
+"Set a timer for 4 hours and 30 minutes",timer
+"Set a timer for 5 hours and 45 minutes",timer
+"Make a timer for 18 hours, 32 minutes, and 46 seconds",timer
+"Create a timer for 10 minutes",timer
+
+"What's the weather today?",weather
+"What's the weather for tomorrow?",weather
+"Tell me the forecast for this week",weather
+"What's the temperature right now?",weather
+"How windy is it outside?",weather
+"What will the weather be like later?",weather
+"Give me the latest weather update.",weather
+"How hot will it get today?",weather
+"Tell me if it's going to be humid today.",weather
+"Will it be sunny or cloudy outside?",weather
+"What are the weather conditions right now?",weather
+"How cold is it expected to get tonight?",weather
+"Give me an update on the wind conditions.",weather
+"What's the humidity level currently?",weather

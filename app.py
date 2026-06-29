@@ -1,28 +1,19 @@
-import speech_recognition as sr
+import joblib
+from extract_entities import extract_from_intent
+from intent_router import route
+import os
 
-r = sr.Recognizer()
-r.pause_threshold = 1.5  # Seconds of silence before ending the phrase
-r.energy_threshold = 500  # Adjust as needed for your mic volume
+model_path = "intent_model.joblib"
 
-mic = sr.Microphone()
+if not os.path.exists(model_path):
+    import train_intent_model # This will run the code inside the file, creating the file
 
-def listen_text():
-    with mic as source:
-        r.adjust_for_ambient_noise(source, duration=0.5)
-        audio = r.listen(source)  # Waits until user stops talking
-    
-    try:
-        return r.recognize_google(audio).lower()
-    except sr.UnknownValueError:
-        return ""
-    except sr.RequestError:
-        return ""
+model = joblib.load(model_path)
 
-while True:
-    print("Waiting for wake word...")
-    text = listen_text()
+text = "Create a timer for 10 minutes"
+intent = model.predict([text])[0]
 
-    if "computer" in text:
-        print("Wake word heard. Speak your command...")
-        command = listen_text()
-        print("Command:", command)
+entities = extract_from_intent(intent, text)
+result = route(intent, entities)
+
+print(result)
