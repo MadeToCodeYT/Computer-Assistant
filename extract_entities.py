@@ -1,4 +1,5 @@
 import re
+import requests
 from datetime import datetime, timedelta
 
 def extract_times(text: str):
@@ -29,27 +30,71 @@ def extract_times(text: str):
 
     return result
 
-def extract_date(text: str):
+def extract_weather(text: str):
     """
-    Extracts the target date from the text.
+    Extracts the weather data from the text. Temperatures will be in Fahrenheit and speed will be in miles per hour.
     Args:
-        text: The text to extract the date from.
+        text: The text to extract the weather data from.
     Returns:
-        A dictionary with the date.
+        A dictionary with the weather data.
         {
-            "date": str
+            "wind_speed": int,
+            "temperature_high": int,
+            "temperature_low": int,
+            "rain_chance": int,
         }
     """
+    def get_latitude_longitude():
+        ip_info = requests.get("https://ipinfo.io/json", timeout=10).json()
+        if "loc" in ip_info:
+            lat_str, lon_str = ip_info["loc"].split(",")
+            return float(lat_str), float(lon_str)
+        else:
+            raise Exception("Could not determine location from IP.")
+    
+
+    # Find which date to use
     text = text.lower()
-    
+
     if "today" in text:
-        date = datetime.now().strftime("%Y-%m-%d")
+        dates = "today"
     elif "tomorrow" in text:
-        date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        dates = "tomorrow"
+    # elif "week" in text:
+    #     dates = "week"
     else:  # Default to today's date
-        date = datetime.now().strftime("%Y-%m-%d")
-    
-    return {"date": date}
+        dates = "today"
+
+    # Get weather data based on location
+    lat, lon = get_latitude_longitude()
+    headers = {
+        "Accept": "application/geo+json"
+    }
+    points_url = f"https://api.weather.gov/points/{lat},{lon}"
+    points = requests.get(points_url, headers=headers, timeout=20).json()
+    forecast_url = points["properties"]["forecast"]
+    daily = requests.get(forecast_url, headers=headers, timeout=20).json()["properties"]["periods"]
+    temperature_highs = [p["temperature"] for p in daily if p["isDaytime"]]
+    temperature_lows = [p["temperature"] for p in daily if not p["isDaytime"]]
+    wind_speeds = [p["windSpeed"] for p in daily]
+    rain_chances = [p["probabilityOfPrecipitation"]["value"] for p in daily]
+
+    if dates == "today":
+        temperature_high = temperature_highs[0]
+        temperature_low = temperature_lows[0]
+        wind_speed = wind_speeds[0]
+        rain_chance = rain_chances[0]
+    elif dates == "tomorrow":
+        temperature_high = temperature_highs[1]
+        temperature_low = temperature_lows[1]
+        wind_speed = wind_speeds[1]
+        rain_chance = rain_chances[1]
+    return {
+        "wind_speed": wind_speed,
+        "temperature_high": temperature_high,
+        "temperature_low": temperature_low,
+        "rain_chance": rain_chance
+    }
 
 def extract_from_intent(intent: str, text: str):
     """
@@ -63,4 +108,4 @@ def extract_from_intent(intent: str, text: str):
     if intent == "timer":
         return extract_times(text)
     elif intent == "weather":
-        return extract_date(text)
+        return extract_weather(text)
