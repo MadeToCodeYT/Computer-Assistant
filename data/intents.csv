@@ -13,15 +13,69 @@ text,intent
 "Make a timer for 18 hours, 32 minutes, and 46 seconds",timer
 "Create a timer for 10 minutes",timer
 "Set a timer for 1 hour and 30 minutes",timer
+"Start a countdown for 2 minutes",timer
+"Create a countdown for 45 seconds",timer
 
 "What's the weather today?",weather
 "What's the weather for tomorrow?",weather
 "What's the temperature right now?",weather
 "How windy is it outside?",weather
 "What will the weather be like later?",weather
-"Give me the latest weather update.",weather
+"Give me the latest weather update",weather
 "How hot will it get today?",weather
 "Will it be sunny or cloudy outside?",weather
 "What are the weather conditions right now?",weather
 "How cold is it expected to get tonight?",weather
-"Give me an update on the wind conditions.",weather
+"Give me an update on the wind conditions",weather
+"Is it going to rain today?",weather
+"Will it snow this week?",weather
+"How much rainfall is expected today?",weather
+"What's the highest temperature today?",weather
+
+"Decrease my volume by 10%",volume
+"Decrease my volume by 4%",volume
+"Decrease volume 9%",volume
+"Increase my volume by 18%",volume
+"Increase my volume by 20%",volume
+"Increase the volume by 20%",volume
+"Lower the volume by 5%",volume
+"Mute the volume",volume
+"Raise my volume by 1%",volume
+"Reduce my volume by 20%",volume
+"Set my volume at 0%",volume
+"Set my volume at 100%",volume
+"Set my volume at 50%",volume
+"Set my volume at 80%",volume
+"Unmute the volume",volume
+
+"Open Safari",openapp
+"Open the Notes app",openapp
+"Open Visual Studio Code",openapp
+"Can you open the Clock app",openapp
+"Launch the Calculator app",openapp
+"Please open Chrome",openapp
+"Start Spotify",openapp
+"Launch Microsoft Word",openapp
+"Open Calendar",openapp
+"Can you open System Preferences",openapp
+"Open the Terminal",openapp
+"Open Photos",openapp
+"Start the Reminders app",openapp
+"Open Messages",openapp
+"Launch FaceTime",openapp
+
+"Close Safari",closeapp
+"Close the Notes app",closeapp
+"Close Visual Studio Code",closeapp
+"Can you close the Clock app",closeapp
+"Close the Calculator app",closeapp
+"Please close Chrome",closeapp
+"Stop Spotify",closeapp
+"Close Microsoft Word",closeapp
+"Close Calendar",closeapp
+"Can you close System Preferences",closeapp
+"Close the Terminal",closeapp
+"Close Photos",closeapp
+"Stop the Reminders app",closeapp
+"Close Messages",closeapp
+"Close FaceTime",closeapp
