@@ -1,53 +1,70 @@
-import joblib
-from extract_entities import extract_from_intent
-from intent_router import route
-import os
-import speech_recognition as sr
-import edge_tts
-import asyncio
+# window size: 1100x700 fixed
 
-model_path = "intent_model.joblib"
+import tkinter as tk
+from time import time
+from math import sin
 
-if not os.path.exists(model_path):
-    import train_intent_model  # This will run the code inside the file, creating the file
+window = tk.Tk()
+window.title("Computer Assistant")
+window.geometry(f"1100x700+{(window.winfo_screenwidth()-1100)//2}+{(window.winfo_screenheight()-700)//2}")
 
-model = joblib.load(model_path)
-r = sr.Recognizer()
-r.pause_threshold = 0.8  # Seconds of silence before ending the phrase
-r.energy_threshold = 500  # Adjust as needed for your mic volume
+canvas = tk.Canvas(window, width=1100, height=700, bg="white", highlightthickness=0)
+canvas.place(x=0, y=0)
 
-mic = sr.Microphone()
-voice = "en-AU-WilliamNeural"
+canvas.create_rectangle(0, 0, 1100, 700, fill="#333333", outline="")
 
-def listen_text():
-    with mic as source:
-        r.adjust_for_ambient_noise(source, duration=0.5)
-        audio = r.listen(source)  # Waits until user stops talking
+for i in range(0, 2 * 1100 // 25):
+    # Draw diagonal lines from left to right across the canvas
+    canvas.create_line(25 * i, 0, 25 * i, 700, width=1, fill="black")
+    # Draw horizontal lines across the canvas
+    canvas.create_line(0, 25 * i, 1100, 25 * i, width=1, fill="black")
 
-    try:
-        return r.recognize_google(audio).lower()
-    except sr.UnknownValueError:
-        return ""
-    except sr.RequestError:
-        return ""
+# Circle at the center of the screen
+canvas.create_oval(
+    470, 270, 630, 430, # Bounding box (x1,y1),(x2,y2)
+    fill="#222222",
+    outline="#bbbbbb",
+    width=4
+)
 
-async def speak(text, output_file="computer_voice.mp3"):
-    communicate = edge_tts.Communicate(text, voice, rate="-10%", volume="-20%")
-    await communicate.save(output_file)
-    os.system(f"open {output_file}")
+def animateArcs():
+    global arc1
+    global arc2
 
-while True:
-    print("Waiting for wake word...")
-    text = listen_text()
+    def update():
+        global arc1, arc2
+   
+        degree = 30 * sin(time())
+        if arc1:
+            canvas.delete(arc1)
+        if arc2:
+            canvas.delete(arc2)
+        arc1 = canvas.create_arc(450, 250, 650, 450, start=45+degree, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
+        arc2 = canvas.create_arc(450, 250, 650, 450, start=225+degree, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
 
-    if "computer" in text:
-        print("Wake word heard. Speak your command...")
-        command = listen_text()
-        print("Command:", command)
-        if not command.strip():
-            continue
-        intent = model.predict([command])[0]
-        entities = extract_from_intent(intent, command)
-        result = route(intent, entities)
-        print(result + "\n")
-        asyncio.run(speak(result))
+        canvas.after(16, update)  # ~60 fps
+
+    arc1 = None
+    arc2 = None
+    update() # Starts the chain
+
+# Text for inside the circle
+canvas.create_text(
+    550, 350,
+    text="Computer",
+    fill="white",
+    font=("Arial", 15, "bold")
+)
+
+# Text for current state
+canvas.create_text(
+    550, 485,
+    text="Idle",
+    fill="#bbbbbb",
+    font=("Arial", 13)
+)
+
+
+window.after(0, animateArcs())
+window.after(2000, window.destroy)
+window.mainloop()
