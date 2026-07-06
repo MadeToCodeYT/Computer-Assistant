@@ -8,7 +8,6 @@ import asyncio
 import subprocess
 from time import time
 from math import sin
-
 from extract_entities import extract_from_intent
 from intent_router import route
 
@@ -28,7 +27,9 @@ voice = "en-AU-WilliamNeural"
 
 window = tk.Tk()
 window.title("Computer Assistant")
-window.geometry(f"1100x700+{(window.winfo_screenwidth()-1100)//2}+{(window.winfo_screenheight()-700)//2}")
+windowWidth = 1300
+windowHeight = 800
+window.geometry(f"{windowWidth}x{windowHeight}+{(window.winfo_screenwidth()-windowWidth)//2}+{(window.winfo_screenheight()-windowHeight)//2}")
 window.resizable(False, False)
 
 def bring_to_front():
@@ -38,21 +39,20 @@ def bring_to_front():
     window.attributes("-topmost", False)
     window.focus_force()
 
-
-canvas = tk.Canvas(window, width=1100, height=700, bg="white", highlightthickness=0)
+canvas = tk.Canvas(window, width=windowWidth, height=windowHeight, bg="white", highlightthickness=0)
 canvas.place(x=0, y=0)
 
-canvas.create_rectangle(0, 0, 1100, 700, fill="#333333", outline="")
+canvas.create_rectangle(0, 0, windowWidth, windowHeight, fill="#333333", outline="")
 
-for i in range(0, 2 * 1100 // 25):
+for i in range(0, 2 * windowWidth // 25):
     # Draw diagonal lines from left to right across the canvas
-    canvas.create_line(25 * i, 0, 25 * i, 700, width=1, fill="black")
+    canvas.create_line(25 * i, 0, 25 * i, windowHeight, width=1, fill="black")
     # Draw horizontal lines across the canvas
-    canvas.create_line(0, 25 * i, 1100, 25 * i, width=1, fill="black")
+    canvas.create_line(0, 25 * i, windowWidth, 25 * i, width=1, fill="black")
 
 # Circle at the center of the screen
 canvas.create_oval(
-    470, 270, 630, 430, # Bounding box (x1,y1),(x2,y2)
+    560, 310, 740, 490,
     fill="#222222",
     outline="#bbbbbb",
     width=4
@@ -65,15 +65,14 @@ def animateArcs():
 
     def update():
         global arc1, arc2, additionalSpin, totalAddSpin
-   
 
         degree = 30 * sin(time())
         if arc1:
             canvas.delete(arc1)
         if arc2:
             canvas.delete(arc2)
-        arc1 = canvas.create_arc(450, 250, 650, 450, start=45+degree-totalAddSpin, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
-        arc2 = canvas.create_arc(450, 250, 650, 450, start=225+degree-totalAddSpin, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
+        arc1 = canvas.create_arc(540, 290, 760, 510, start=45 + degree - totalAddSpin, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
+        arc2 = canvas.create_arc(540, 290, 760, 510, start=225 + degree - totalAddSpin, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
 
         if additionalSpin > 0:
             increment = max(1, int(additionalSpin * 0.15))
@@ -84,11 +83,11 @@ def animateArcs():
 
     arc1 = None
     arc2 = None
-    update() # Starts the chain
+    update()
 
 # Text for inside the circle
 canvas.create_text(
-    550, 350,
+    650, 400,
     text="Computer",
     fill="white",
     font=("Arial", 15, "bold")
@@ -113,7 +112,7 @@ def updateStateText():
             newState = state
 
         currentStateText = canvas.create_text(
-            550, 485,
+            650, 560,
             text=newState,
             fill="#bbbbbb",
             font=("Arial", 13)
@@ -137,12 +136,14 @@ def updateCommandText():
             canvas.delete(command_text)
         
         command_text = canvas.create_text(
-            550, 525,
+            650, 620,
             text=commandValue,
             fill="#999999",
-            font=("Arial", 15, "bold")
+            font=("Arial", 15, "bold"),
+            width=1000,
+            anchor="center"
         )
-
+   
         window.after(100, update)
 
     update()
