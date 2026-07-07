@@ -15,7 +15,7 @@ while cap.isOpened():
     result = hands.process(rgb_frame)
 
     if result.multi_hand_landmarks:
-        hand_landmarks = result.multi_hand_landmarks[0]  # Only process the first detected hand
+        hand_landmarks = result.multi_hand_landmarks[-1]  # Only process the first detected hand
         finger_states = []
 
         # Landmark indices for finger tips and their lower points

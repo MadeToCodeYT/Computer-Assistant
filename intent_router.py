@@ -1,9 +1,6 @@
 import subprocess
-from time import sleep
 
 def timer(hours:int, minutes:int, seconds:int):
-    sleep(1) # Pretend loading for now
-
     units = []
     if hours:
         units.append(f"{hours}hr")
@@ -68,8 +65,6 @@ def volume(type: str, percentage: int):
         print(f"Error setting volume: {e}")
 
 def openapp(appName: str):
-    sleep(1) # Pretend loading for now
-
     try:
         subprocess.check_call(["open", "-a", appName])
         return f"Opening {appName}..."
@@ -77,8 +72,6 @@ def openapp(appName: str):
         return f"Unable to find application named '{appName}'."
    
 def closeapp(appName: str):
-    sleep(1) # Pretend loading for now
-
     try:
         script = f'tell application "{appName}" to quit'
         subprocess.check_call(["osascript", "-e", script])

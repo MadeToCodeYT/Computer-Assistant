@@ -7,11 +7,15 @@ import edge_tts
 import asyncio
 import subprocess
 import queue
+import faulthandler
+import cv2
+from PIL import Image, ImageTk
 from time import time
 from math import sin
 from extract_entities import extract_from_intent
 from intent_router import route
 
+faulthandler.enable()  # Prints a native stack trace to stderr if we segfault
 
 model_path = "intent_model.joblib"
 
@@ -25,6 +29,7 @@ r.energy_threshold = 700  # Adjust as needed for your mic volume
 
 mic = sr.Microphone()
 voice = "en-AU-WilliamNeural"
+cap = None
 cameraOpen = False
 task_queue = queue.Queue()
 
@@ -43,6 +48,11 @@ windowHeight = 800
 window.geometry(f"{windowWidth}x{windowHeight}+{(window.winfo_screenwidth()-windowWidth)//2}+{(window.winfo_screenheight()-windowHeight)//2}")
 window.resizable(False, False)
 
+video_bbox = [0, 0, 1300, 800]
+# video_bbox = [25, 25, 1275, 775]
+video_image_id = None
+video_photo = None
+
 def bring_to_front():
     window.lift()
     window.attributes("-topmost", True)
@@ -54,8 +64,8 @@ canvas = tk.Canvas(window, width=windowWidth, height=windowHeight, bg="#333333",
 canvas.place(x=0, y=0)
 
 for i in range(0, 2 * windowWidth // 25):
-    canvas.create_line(25 * i, 0, 25 * i, windowHeight, width=1, fill="black")
-    canvas.create_line(0, 25 * i, windowWidth, 25 * i, width=1, fill="black")
+    canvas.create_line(25 * i, 0, 25 * i, windowHeight, width=1, fill="black", tags="grid")
+    canvas.create_line(0, 25 * i, windowWidth, 25 * i, width=1, fill="black", tags="grid")
 
 # Circle bounding box variables: [x1, y1, x2, y2]
 circle_bbox = [560, 310, 740, 490]
@@ -94,7 +104,7 @@ def updateCircle():
 additionalSpin = 0
 totalAddSpin = 0
 def animateArcs():
-    global arc1, arc2, additionalSpin, totalAddSpin
+    global arc1, arc2
 
     def update():
         global arc1, arc2, additionalSpin, totalAddSpin
@@ -131,8 +141,6 @@ def animateArcs():
 state = "Idle"
 currentStateText = None
 def updateStateText():
-    global currentStateText
-
     def update():
         global currentStateText
 
@@ -159,25 +167,41 @@ def updateStateText():
 # Text for command/response
 commandValue = ""
 command_text = None
+command_text_bg = None
 commandCenter = [650, 620]
 
 def updateCommandText():
-    global command_text
-
     def update():
-        global command_text
+        global command_text, command_text_bg
 
         if command_text is not None:
             canvas.delete(command_text)
+        if command_text_bg is not None:
+            canvas.delete(command_text_bg)
         
-        command_text = canvas.create_text(
+        temp_text = canvas.create_text(
             *commandCenter,
             text=commandValue,
-            fill="#999999",
             font=("Arial", 15, "bold"),
             width=1000,
-            anchor="center"
+            anchor="center",
+            fill="#999999"
         )
+
+        bbox = canvas.bbox(temp_text)
+        if bbox and cameraOpen and commandValue:
+            rect_padding = 8
+            command_text_bg = canvas.create_rectangle(
+                bbox[0] - rect_padding,
+                bbox[1] - rect_padding,
+                bbox[2] + rect_padding,
+                bbox[3] + rect_padding,
+                fill="black",
+                outline=""
+            )
+            # Raise text above the rectangle
+            canvas.tag_raise(temp_text, command_text_bg)
+        command_text = temp_text
 
         window.after(100, update)
 
@@ -226,7 +250,50 @@ async def speak(text, output_file="computer_voice.mp3"):
     state = "Speaking"
     subprocess.run(["afplay", output_file])
 
-    commandValue = "" # Reset the value   
+    commandValue = "" # Reset the value
+
+def update_camera_frame():
+    global video_image_id, video_photo, cap
+
+    if not cameraOpen:
+        return
+
+    if cap is None:
+        cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+
+    if not cap.isOpened():
+        window.after(15, update_camera_frame)
+        return
+
+    ret, frame = cap.read()
+    if ret:
+        frame = cv2.flip(frame, 1)
+        w = video_bbox[2] - video_bbox[0]
+        h = video_bbox[3] - video_bbox[1]
+        frame = cv2.resize(frame, (w, h))
+        cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(cv2image).convert("RGBA")
+        alpha_layer = Image.new("L", img.size, int(255*0.75))
+        img.putalpha(alpha_layer)
+        video_photo = ImageTk.PhotoImage(image=img)
+ 
+        if video_image_id is None:
+            # Video background
+            canvas.create_rectangle(
+                *video_bbox,
+                fill="#444444", outline="", tags="video_bg"
+            )
+            video_image_id = canvas.create_image(
+       
+                video_bbox[0], video_bbox[1],
+                image=video_photo, anchor="nw", tags="video"
+            )
+        else:
+            canvas.itemconfig(video_image_id, image=video_photo)
+        canvas.tag_lower("grid", "video_bg")
+        canvas.tag_lower("video_bg", "video")
+
+    window.after(15, update_camera_frame)
 
 def model_mainloop():
     global state, commandValue, additionalSpin, cameraOpen
@@ -250,8 +317,11 @@ def model_mainloop():
                 task_queue.put(lambda: smooth_move("circle", [1090, 530, 1270, 720]))
            
                 # Move command text to the bottom center
-                task_queue.put(lambda: smooth_move("command", [650, 775]))
+                task_queue.put(lambda: smooth_move("command", [650, 765]))
                 
+                # Show the camera frame
+                task_queue.put(update_camera_frame)
+
                 result = "Opening Camera test..."
             else:
                 result = route(intent, entities)
@@ -260,11 +330,21 @@ def model_mainloop():
             asyncio.run(speak(result))
 
     # Loop again
+    print("looping again")
     task_queue.put(start_model)
 
 
 def start_model():
     threading.Thread(target=model_mainloop, daemon=True).start()
+
+def on_close():
+    global cameraOpen, cap
+    cameraOpen = False
+    if cap is not None:
+        cap.release()
+    window.destroy()
+
+window.protocol("WM_DELETE_WINDOW", on_close)
 
 window.after(0, process_queue)
 window.after(0, updateCircle)
