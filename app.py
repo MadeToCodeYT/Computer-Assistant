@@ -6,6 +6,7 @@ import speech_recognition as sr
 import edge_tts
 import asyncio
 import subprocess
+import queue
 from time import time
 from math import sin
 from extract_entities import extract_from_intent
@@ -24,6 +25,16 @@ r.energy_threshold = 700  # Adjust as needed for your mic volume
 
 mic = sr.Microphone()
 voice = "en-AU-WilliamNeural"
+cameraOpen = False
+task_queue = queue.Queue()
+
+def process_queue():
+    while True:
+        try:
+            task_queue.get_nowait()()
+        except queue.Empty:
+            break
+    window.after(25, process_queue)
 
 window = tk.Tk()
 window.title("Computer Assistant")
@@ -39,24 +50,46 @@ def bring_to_front():
     window.attributes("-topmost", False)
     window.focus_force()
 
-canvas = tk.Canvas(window, width=windowWidth, height=windowHeight, bg="white", highlightthickness=0)
+canvas = tk.Canvas(window, width=windowWidth, height=windowHeight, bg="#333333", highlightthickness=0)
 canvas.place(x=0, y=0)
 
-canvas.create_rectangle(0, 0, windowWidth, windowHeight, fill="#333333", outline="")
-
 for i in range(0, 2 * windowWidth // 25):
-    # Draw diagonal lines from left to right across the canvas
     canvas.create_line(25 * i, 0, 25 * i, windowHeight, width=1, fill="black")
-    # Draw horizontal lines across the canvas
     canvas.create_line(0, 25 * i, windowWidth, 25 * i, width=1, fill="black")
 
-# Circle at the center of the screen
-canvas.create_oval(
-    560, 310, 740, 490,
-    fill="#222222",
-    outline="#bbbbbb",
-    width=4
-)
+# Circle bounding box variables: [x1, y1, x2, y2]
+circle_bbox = [560, 310, 740, 490]
+
+circle_oval = None
+circle_text = None
+
+def updateCircle():
+    global circle_oval, circle_text
+    # Remove existing shapes/text if they exist
+    if circle_oval is not None:
+        canvas.delete(circle_oval)
+    if circle_text is not None:
+        canvas.delete(circle_text)
+
+    circle_oval = canvas.create_oval(
+        *circle_bbox,
+        fill="#222222",
+        outline="#bbbbbb",
+        width=4
+    )
+
+    # Get the center of the bounding box
+    x_center = (circle_bbox[0] + circle_bbox[2]) // 2
+    y_center = (circle_bbox[1] + circle_bbox[3]) // 2
+
+    circle_text = canvas.create_text(
+        x_center, y_center,
+        text="Computer",
+        fill="white",
+        font=("Arial", 15, "bold")
+    )
+
+    canvas.after(16, updateCircle)
 
 additionalSpin = 0
 totalAddSpin = 0
@@ -71,27 +104,28 @@ def animateArcs():
             canvas.delete(arc1)
         if arc2:
             canvas.delete(arc2)
-        arc1 = canvas.create_arc(540, 290, 760, 510, start=45 + degree - totalAddSpin, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
-        arc2 = canvas.create_arc(540, 290, 760, 510, start=225 + degree - totalAddSpin, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
+
+        # Relative to the circle_bbox
+        arc_bbox = [
+            circle_bbox[0] - 20,  # left
+            circle_bbox[1] - 20,  # top
+            circle_bbox[2] + 20,  # right
+            circle_bbox[3] + 20   # bottom
+        ]
+        arc1 = canvas.create_arc(*arc_bbox, start=45 + degree - totalAddSpin, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
+        arc2 = canvas.create_arc(*arc_bbox, start=225 + degree - totalAddSpin, extent=60, style=tk.ARC, outline="#bbbbbb", width=5)
+ 
 
         if additionalSpin > 0:
             increment = max(1, int(additionalSpin * 0.15))
             totalAddSpin += increment
             additionalSpin -= increment
 
-        canvas.after(16, update)  # ~60 fps
+        canvas.after(16, update)
 
     arc1 = None
     arc2 = None
     update()
-
-# Text for inside the circle
-canvas.create_text(
-    650, 400,
-    text="Computer",
-    fill="white",
-    font=("Arial", 15, "bold")
-)
 
 # Text for current state
 state = "Idle"
@@ -112,7 +146,7 @@ def updateStateText():
             newState = state
 
         currentStateText = canvas.create_text(
-            650, 560,
+            (circle_bbox[0] + circle_bbox[2]) // 2, (circle_bbox[1] + circle_bbox[3]) // 2 + 140, # Relative to circle_bbox
             text=newState,
             fill="#bbbbbb",
             font=("Arial", 13)
@@ -125,6 +159,7 @@ def updateStateText():
 # Text for command/response
 commandValue = ""
 command_text = None
+commandCenter = [650, 620]
 
 def updateCommandText():
     global command_text
@@ -136,18 +171,40 @@ def updateCommandText():
             canvas.delete(command_text)
         
         command_text = canvas.create_text(
-            650, 620,
+            *commandCenter,
             text=commandValue,
             fill="#999999",
             font=("Arial", 15, "bold"),
             width=1000,
             anchor="center"
         )
-   
+
         window.after(100, update)
 
     update()
 
+def smooth_move(widget, new_position):
+    global circle_bbox, commandCenter
+
+    closeness = []
+    if widget == "circle":
+        for i in range(len(circle_bbox)):
+            increment = int((new_position[i] - circle_bbox[i]) * 0.2)
+            circle_bbox[i] += increment
+            closeness.append(abs(new_position[i] - circle_bbox[i]))
+    elif widget == "command":
+        for i in range(len(commandCenter)):
+            increment = int((new_position[i] - commandCenter[i]) * 0.15)
+            commandCenter[i] += increment
+            closeness.append(abs(new_position[i] - commandCenter[i]))
+
+    if all(c < 1 for c in closeness):
+        if widget == "circle":
+            circle_bbox = new_position
+        elif widget == "command":
+            commandCenter = new_position
+    else:
+        window.after(16, smooth_move, widget, new_position)
 
 def listen_text():
     with mic as source:
@@ -172,13 +229,13 @@ async def speak(text, output_file="computer_voice.mp3"):
     commandValue = "" # Reset the value   
 
 def model_mainloop():
-    global state, commandValue, additionalSpin
+    global state, commandValue, additionalSpin, cameraOpen
 
     state = "Idle"
     text = listen_text()
 
     if "computer" in text:
-        window.after(0, bring_to_front)
+        task_queue.put(bring_to_front)
         state = "Listening"
         additionalSpin = 180
         command = listen_text()
@@ -187,19 +244,30 @@ def model_mainloop():
         if command.strip():
             intent = model.predict([command])[0]
             entities = extract_from_intent(intent, command)
-            result = route(intent, entities)
-            commandValue = result
+            if intent == "openapp" and entities.get("appName", None) == "Camera":
+                cameraOpen = True
+                # Move circle bbox to the bottom right
+                task_queue.put(lambda: smooth_move("circle", [1090, 530, 1270, 720]))
+           
+                # Move command text to the bottom center
+                task_queue.put(lambda: smooth_move("command", [650, 775]))
+                
+                result = "Opening Camera test..."
+            else:
+                result = route(intent, entities)
 
+            commandValue = result
             asyncio.run(speak(result))
 
-    window.after(0, start_model)
+    # Loop again
+    task_queue.put(start_model)
 
 
 def start_model():
     threading.Thread(target=model_mainloop, daemon=True).start()
 
-
-
+window.after(0, process_queue)
+window.after(0, updateCircle)
 window.after(0, updateStateText)
 window.after(0, updateCommandText)
 window.after(0, animateArcs)
