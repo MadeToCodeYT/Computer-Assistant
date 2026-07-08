@@ -9,6 +9,7 @@ import subprocess
 import queue
 import faulthandler
 import cv2
+import mediapipe as mp
 from PIL import Image, ImageTk
 from time import time
 from math import sin
@@ -20,7 +21,7 @@ faulthandler.enable()  # Prints a native stack trace to stderr if we segfault
 model_path = "intent_model.joblib"
 
 if not os.path.exists(model_path):
-    import train_intent_model  # This will run the code inside the file, creating the file
+    import train_intent_model  # This will run the code inside the file, creating the model
 
 model = joblib.load(model_path)
 r = sr.Recognizer()
@@ -31,8 +32,23 @@ mic = sr.Microphone()
 voice = "en-AU-WilliamNeural"
 cap = None
 cameraOpen = False
-task_queue = queue.Queue()
+mp_hands = mp.solutions.hands
+mp_drawing = mp.solutions.drawing_utils
 
+# Camera capture + hand-tracking run on their own background thread so the
+# (comparatively slow) cv2.read()/mediapipe work never blocks the Tk mainloop.
+camera_lock = threading.Lock()
+camera_thread_running = False
+latest_camera_data = {"img": None, "gesture": "No Hand Found"}
+
+FINGER_TIPS = [4, 8, 12, 16, 20]   # Thumb, Index, Middle, Ring, Pinky
+FINGER_PIPS = [3, 6, 10, 14, 18]   # Just below the tips
+GESTURES = {
+    "Moving Cursor": ["Thumb", "Index", "Middle", "Ring", "Pinky"],
+    "Moving Widget": []
+}
+
+task_queue = queue.Queue()
 def process_queue():
     while True:
         try:
@@ -52,6 +68,7 @@ video_bbox = [0, 0, 1300, 800]
 # video_bbox = [25, 25, 1275, 775]
 video_image_id = None
 video_photo = None
+hand_gesture_text = None
 
 def bring_to_front():
     window.lift()
@@ -252,31 +269,155 @@ async def speak(text, output_file="computer_voice.mp3"):
 
     commandValue = "" # Reset the value
 
+def detect_gesture(result, frame_shape):
+    """Pure function: mediapipe result -> gesture label. No Tk, no I/O."""
+    if not result.multi_hand_landmarks:
+        return "No Hand Found"
+
+    hand_landmarks = result.multi_hand_landmarks[-1]  # Only look at one hand
+
+    # Find hand type (left/right); default to right if not present
+    hand_type = "Right"
+    if hasattr(result, "multi_handedness"):
+        try:
+            hand_type = result.multi_handedness[-1].classification[0].label
+        except Exception:
+            pass
+
+    h, w, _ = frame_shape
+    landmarks_px = [(int(lm.x * w), int(lm.y * h)) for lm in hand_landmarks.landmark]
+
+    # Thumb: direction of "open" flips depending on handedness
+    finger_states = []
+    if hand_type == "Right":
+        if landmarks_px[4][0] < landmarks_px[3][0]:
+            finger_states.append("Thumb")
+    else:
+        if landmarks_px[4][0] > landmarks_px[3][0]:
+            finger_states.append("Thumb")
+
+    # Other fingers: tip.y < pip.y = open
+    for i, name in zip([1, 2, 3, 4], ["Index", "Middle", "Ring", "Pinky"]):
+        if landmarks_px[FINGER_TIPS[i]][1] < landmarks_px[FINGER_PIPS[i]][1]:
+            finger_states.append(name)
+
+    for gesture_name, required_fingers in GESTURES.items():
+        if set(required_fingers) == set(finger_states):
+            return gesture_name
+
+    return "No Gesture Recognized"
+
+
+def resize_cover(frame, target_w, target_h):
+    """Scale `frame` up to fully cover a target_w x target_h box while
+    keeping its aspect ratio, then center-crop the overflow. Avoids the
+    stretched/distorted look a plain cv2.resize gives when the camera's
+    aspect ratio doesn't match the display box."""
+    h, w = frame.shape[:2]
+    scale = max(target_w / w, target_h / h)
+    new_w, new_h = int(round(w * scale)), int(round(h * scale))
+    resized = cv2.resize(frame, (new_w, new_h))
+
+    x0 = (new_w - target_w) // 2
+    y0 = (new_h - target_h) // 2
+    return resized[y0:y0 + target_h, x0:x0 + target_w]
+
+def camera_worker():
+    """Runs on a background thread: owns the camera and the Hands() model.
+    Never touches Tk widgets -- it just drops the latest finished frame into
+    latest_camera_data for the UI thread to pick up whenever it's ready."""
+    global cap
+
+    cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+    # Capture at a modest fixed resolution instead of whatever the camera's
+    # default happens to be (often 1080p) -- less data to move/convert/detect on.
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FPS, 60)
+
+    display_w = video_bbox[2] - video_bbox[0]
+    display_h = video_bbox[3] - video_bbox[1]
+
+    # video_bbox doesn't change size at runtime, so this can be built once
+    # instead of every single frame.
+    alpha_layer = Image.new("L", (display_w, display_h), int(255 * 0.75))
+
+    # A dedicated Hands instance for this thread. max_num_hands=1 and
+    # model_complexity=0 use the lighter/faster model, which is all we need
+    # since detect_gesture() only ever looks at one hand.
+    hands_local = mp_hands.Hands(
+        max_num_hands=1,
+        model_complexity=0,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+
+    while cameraOpen:
+        if not cap.isOpened():
+            continue
+
+        ret, frame = cap.read()
+        if not ret:
+            continue
+
+        frame = cv2.flip(frame, 1)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # convert once, reuse below
+
+        # Detect on the small native-resolution frame, NOT an upscaled copy --
+        # mediapipe's cost scales with input size, and we don't need 1300x800
+        # for landmark accuracy.
+        result = hands_local.process(rgb_frame)
+        gesture_display = detect_gesture(result, frame.shape)
+
+        display_rgb = resize_cover(rgb_frame, display_w, display_h)
+        img = Image.fromarray(display_rgb).convert("RGBA")
+        img.putalpha(alpha_layer)
+
+        with camera_lock:
+            latest_camera_data["img"] = img
+            latest_camera_data["gesture"] = gesture_display
+
+    hands_local.close()
+    if cap is not None:
+        cap.release()
+        cap = None
+
+
+def start_camera():
+    global camera_thread_running
+    if not camera_thread_running:
+        camera_thread_running = True
+        threading.Thread(target=camera_worker, daemon=True).start()
+
+
 def update_camera_frame():
-    global video_image_id, video_photo, cap
+    """Runs on the Tk mainloop via window.after. Only touches the canvas --
+    all the slow camera/mediapipe work happens in camera_worker() above, so
+    this stays cheap and the UI never blocks on cap.read()."""
+    global video_image_id, video_photo, hand_gesture_text
 
     if not cameraOpen:
         return
 
-    if cap is None:
-        cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+    with camera_lock:
+        img = latest_camera_data["img"]
+        gesture_display = latest_camera_data["gesture"]
 
-    if not cap.isOpened():
-        window.after(15, update_camera_frame)
-        return
-
-    ret, frame = cap.read()
-    if ret:
-        frame = cv2.flip(frame, 1)
-        w = video_bbox[2] - video_bbox[0]
-        h = video_bbox[3] - video_bbox[1]
-        frame = cv2.resize(frame, (w, h))
-        cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(cv2image).convert("RGBA")
-        alpha_layer = Image.new("L", img.size, int(255*0.75))
-        img.putalpha(alpha_layer)
+    if img is not None:
         video_photo = ImageTk.PhotoImage(image=img)
- 
+
+        if hand_gesture_text is not None:
+            canvas.delete(hand_gesture_text)
+
+        hand_gesture_text = canvas.create_text(
+            video_bbox[0] + 20, video_bbox[1] + 20,
+            text=gesture_display,
+            fill="black",
+            anchor="nw",
+            font=("Arial", 18, "bold"),
+            tags="gesture_text"
+        )
+
         if video_image_id is None:
             # Video background
             canvas.create_rectangle(
@@ -284,7 +425,6 @@ def update_camera_frame():
                 fill="#444444", outline="", tags="video_bg"
             )
             video_image_id = canvas.create_image(
-       
                 video_bbox[0], video_bbox[1],
                 image=video_photo, anchor="nw", tags="video"
             )
@@ -292,6 +432,7 @@ def update_camera_frame():
             canvas.itemconfig(video_image_id, image=video_photo)
         canvas.tag_lower("grid", "video_bg")
         canvas.tag_lower("video_bg", "video")
+        canvas.tag_raise("gesture_text")
 
     window.after(15, update_camera_frame)
 
@@ -313,6 +454,8 @@ def model_mainloop():
             entities = extract_from_intent(intent, command)
             if intent == "openapp" and entities.get("appName", None) == "Camera":
                 cameraOpen = True
+                start_camera()  # launch the background capture/mediapipe thread
+
                 # Move circle bbox to the bottom right
                 task_queue.put(lambda: smooth_move("circle", [1090, 530, 1270, 720]))
            
@@ -330,7 +473,6 @@ def model_mainloop():
             asyncio.run(speak(result))
 
     # Loop again
-    print("looping again")
     task_queue.put(start_model)
 
 
@@ -338,10 +480,8 @@ def start_model():
     threading.Thread(target=model_mainloop, daemon=True).start()
 
 def on_close():
-    global cameraOpen, cap
-    cameraOpen = False
-    if cap is not None:
-        cap.release()
+    global cameraOpen
+    cameraOpen = False  # camera_worker sees this and releases cap itself
     window.destroy()
 
 window.protocol("WM_DELETE_WINDOW", on_close)
